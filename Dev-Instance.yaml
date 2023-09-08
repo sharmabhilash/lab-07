@@ -1,0 +1,111 @@
+Description: 'Lab: Deploy Dev Instances'
+
+Parameters:
+  WindowsAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 192.168.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Dev-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Dev-VPC IGW
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 192.168.0.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Public Subnet
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Dev VPC Public Route Table
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  DevInstanceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: DevInstance-SG
+      GroupDescription: DevInstance-SG
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: DevInstance-SG
+
+  DevInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref WindowsAmiId
+      Tags:
+        - Key: Name
+          Value: DevPYInstance
+      InstanceType: t2.medium
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref DevInstanceSG
+      UserData:
+        Fn::Base64: !Sub |
+            <Powershell>
+            Set-ExecutionPolicy Unrestricted -Force
+            $Password = ConvertTo-SecureString -String "lab-password@123" -AsPlainText -Force
+            $UserAccount = Get-LocalUser -Name "administrator"
+            $UserAccount | Set-LocalUser -Password $Password
+            Rename-Computer -NewName "DevPYInstance"
+            Restart-Computer
+            </Powershell>
+
+Outputs:
+  DevInstancePublicIP:
+    Value: !GetAtt [DevInstance, PublicIp]
+    Description: DevPYInstance Public IP Address
+    
